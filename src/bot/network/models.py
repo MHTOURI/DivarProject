@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
-
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -13,8 +12,6 @@ class RequestResult:
     data: Optional[Dict[str, Any]] = None
 
     error: Optional[str] = None
-
-
 
 
 @dataclass

@@ -1,7 +1,7 @@
 import os
-from datetime import datetime
 from collections import deque
-from typing import Optional, List, Dict
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from rich.console import Console
 from rich.text import Text
@@ -37,6 +37,7 @@ def init_logger(socketio=None):
 # ======================================================
 # Main Log Function
 # ======================================================
+
 
 def log(message: str, level: str = "INFO"):
     """
@@ -87,6 +88,7 @@ def log(message: str, level: str = "INFO"):
 # ======================================================
 # Helper Functions
 # ======================================================
+
 
 def get_logs(limit: int = 100) -> List[Dict]:
     """آخرین لاگ‌ها را برمی‌گرداند (برای API)"""

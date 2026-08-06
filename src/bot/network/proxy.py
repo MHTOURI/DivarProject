@@ -1,18 +1,11 @@
 from .models import Proxy
 
 
-
 class ProxyManager:
 
-
-    def __init__(
-        self,
-        proxies=None
-    ):
-
+    def __init__(self, proxies=None):
 
         self.proxies = []
-
 
         if proxies:
 
@@ -20,25 +13,9 @@ class ProxyManager:
 
                 self.add(p)
 
+    def add(self, proxy):
 
-
-
-    def add(
-        self,
-        proxy
-    ):
-
-        self.proxies.append(
-
-            Proxy(
-                url=proxy
-            )
-
-        )
-
-
-
-
+        self.proxies.append(Proxy(url=proxy))
 
     def get(self):
 
@@ -48,17 +25,9 @@ class ProxyManager:
 
                 return proxy.url
 
-
         return None
 
-
-
-
-
-    def fail(
-        self,
-        proxy_url
-    ):
+    def fail(self, proxy_url):
 
         for proxy in self.proxies:
 
@@ -66,20 +35,11 @@ class ProxyManager:
 
                 proxy.failures += 1
 
-
                 if proxy.failures >= 5:
 
                     proxy.alive = False
 
-
-
-
-
-
-    def success(
-        self,
-        proxy_url
-    ):
+    def success(self, proxy_url):
 
         for proxy in self.proxies:
 

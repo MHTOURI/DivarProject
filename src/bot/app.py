@@ -1,56 +1,71 @@
-import os
 import asyncio
+import os
+import secrets
 import threading
 import time
 from datetime import timedelta
 from pathlib import Path
 
 from flask import (
-    Flask, render_template, request, redirect, url_for,
-    flash, jsonify, session, send_file
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
 )
-from flask_socketio import SocketIO, disconnect
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_login import (
+    LoginManager,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from flask_socketio import SocketIO, disconnect
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-import secrets
-from config import SECRET_KEY, EXPORT_DIR, FORCE_HTTPS, LOG_DIR
-from database import (
-    init_db, get_stats, get_all_ads, get_districts,
-    get_user_by_username, create_admin_user,
-    get_scraper_command, set_scraper_command, get_worker_status,
-    list_users, count_active_users, set_user_active, delete_user_db,
+from bot.auth import User, authenticate_user, hash_password, login_manager
+from bot.config import EXPORT_DIR, FORCE_HTTPS, LOG_DIR, SECRET_KEY
+from bot.database import (
+    count_active_users,
+    create_admin_user,
+    delete_user_db,
+    get_all_ads,
+    get_districts,
+    get_scraper_command,
+    get_stats,
+    get_user_by_username,
+    get_worker_status,
+    init_db,
+    list_users,
+    set_scraper_command,
+    set_user_active,
 )
-from auth import login_manager, authenticate_user, hash_password, User
-from export_excel import export_to_excel, export_links_txt
-from logger.logger import log
+from bot.export_excel import export_links_txt, export_to_excel
+from bot.logger.logger import log
 
 # ====================== App ======================
 app = Flask(__name__)
 app.config.update(
-
     SECRET_KEY=SECRET_KEY,
-
     SESSION_COOKIE_NAME="divar_session",
-
     SESSION_COOKIE_HTTPONLY=True,
-
     SESSION_COOKIE_SECURE=FORCE_HTTPS,
-
     SESSION_COOKIE_SAMESITE="Lax",
-
     REMEMBER_COOKIE_HTTPONLY=True,
-
     REMEMBER_COOKIE_SECURE=FORCE_HTTPS,
-
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=12)
-
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
 )
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-limiter = Limiter(get_remote_address, app=app, default_limits=["300 per day", "60 per hour"])
+limiter = Limiter(
+    get_remote_address, app=app, default_limits=["300 per day", "60 per hour"]
+)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=False)
 
 login_manager.init_app(app)
@@ -85,7 +100,10 @@ def _tail_log_file():
                     ts_part, rest = line.split("] [", 1)
                     level_part, message = rest.split("] ", 1)
                     short_time = ts_part.strip("[").split(" ")[1]
-                    socketio.emit("log", {"time": short_time, "level": level_part, "message": message})
+                    socketio.emit(
+                        "log",
+                        {"time": short_time, "level": level_part, "message": message},
+                    )
                 except Exception:
                     socketio.emit("log", {"time": "", "level": "INFO", "message": line})
     except Exception:
@@ -113,7 +131,9 @@ def set_security_headers(response):
         "frame-ancestors 'none'"
     )
     if FORCE_HTTPS:
-        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains"
+        )
     return response
 
 
@@ -136,10 +156,12 @@ def _check_csrf():
             flash("نشست شما منقضی شده، دوباره تلاش کنید", "error")
             return redirect(url_for("login"))
 
+
 # ====================== State ======================
 # دیگر وضعیت اسکرپر در حافظه‌ی پروسه‌ی Flask نگه‌داری نمی‌شود.
 # اسکرپر یک پروسه‌ی مستقل است (worker.py) و از طریق جدول settings در دیتابیس
 # کنترل می‌شود؛ این یعنی وب‌پنل می‌تواند بدون توقف اسکرپر ری‌استارت شود.
+
 
 # ====================== Auth ======================
 @app.route("/login", methods=["GET", "POST"])
@@ -256,6 +278,7 @@ def download_file(filename):
 # app.py دیگر خودش اسکرپینگ اجرا نمی‌کند — فقط یک دستور در دیتابیس می‌گذارد
 # که پروسه‌ی مستقل worker.py آن را می‌خواند و اجرا می‌کند.
 
+
 @app.route("/api/start", methods=["POST"])
 @login_required
 @limiter.limit("10 per minute")
@@ -266,10 +289,15 @@ def api_start():
 
     if not status["worker_alive"]:
         log("Start requested but worker.py process seems offline", "WARNING")
-        return jsonify({
-            "status": "worker_offline",
-            "message": "پروسه‌ی worker.py در حال اجرا نیست. آن را جداگانه اجرا کن: python worker.py"
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "worker_offline",
+                    "message": "پروسه‌ی worker.py در حال اجرا نیست. آن را جداگانه اجرا کن: python worker.py",
+                }
+            ),
+            503,
+        )
 
     asyncio.run(set_scraper_command("start"))
     log(f"Scraper start requested by {current_user.username}", "INFO")
@@ -295,17 +323,38 @@ def api_users():
 @login_required
 @limiter.limit("15 per minute")
 def api_users_create():
-    username = (request.json or {}).get("username", "").strip() if request.is_json else request.form.get("username", "").strip()
-    password = (request.json or {}).get("password", "") if request.is_json else request.form.get("password", "")
+    username = (
+        (request.json or {}).get("username", "").strip()
+        if request.is_json
+        else request.form.get("username", "").strip()
+    )
+    password = (
+        (request.json or {}).get("password", "")
+        if request.is_json
+        else request.form.get("password", "")
+    )
 
     if not username or len(username) < 3:
-        return jsonify({"status": "error", "message": "نام کاربری باید حداقل ۳ کاراکتر باشد"}), 400
+        return (
+            jsonify(
+                {"status": "error", "message": "نام کاربری باید حداقل ۳ کاراکتر باشد"}
+            ),
+            400,
+        )
     if not password or len(password) < 8:
-        return jsonify({"status": "error", "message": "رمز عبور باید حداقل ۸ کاراکتر باشد"}), 400
+        return (
+            jsonify(
+                {"status": "error", "message": "رمز عبور باید حداقل ۸ کاراکتر باشد"}
+            ),
+            400,
+        )
 
     existing = asyncio.run(get_user_by_username(username))
     if existing:
-        return jsonify({"status": "error", "message": "این نام کاربری قبلاً ثبت شده"}), 409
+        return (
+            jsonify({"status": "error", "message": "این نام کاربری قبلاً ثبت شده"}),
+            409,
+        )
 
     ok = asyncio.run(create_admin_user(username, hash_password(password)))
     if not ok:
@@ -319,7 +368,15 @@ def api_users_create():
 @login_required
 def api_users_toggle(user_id):
     if str(user_id) == current_user.id:
-        return jsonify({"status": "error", "message": "نمی‌توانید دسترسی خودتان را غیرفعال کنید"}), 400
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "نمی‌توانید دسترسی خودتان را غیرفعال کنید",
+                }
+            ),
+            400,
+        )
 
     users = asyncio.run(list_users())
     target = next((u for u in users if u["id"] == user_id), None)
@@ -330,10 +387,21 @@ def api_users_toggle(user_id):
     if not new_active:
         active_count = asyncio.run(count_active_users())
         if active_count <= 1:
-            return jsonify({"status": "error", "message": "باید حداقل یک ادمین فعال باقی بماند"}), 400
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "باید حداقل یک ادمین فعال باقی بماند",
+                    }
+                ),
+                400,
+            )
 
     asyncio.run(set_user_active(user_id, new_active))
-    log(f"User {'activated' if new_active else 'deactivated'} by {current_user.username}: {target['username']}", "WARNING")
+    log(
+        f"User {'activated' if new_active else 'deactivated'} by {current_user.username}: {target['username']}",
+        "WARNING",
+    )
     return jsonify({"status": "ok", "is_active": new_active})
 
 
@@ -341,7 +409,12 @@ def api_users_toggle(user_id):
 @login_required
 def api_users_delete(user_id):
     if str(user_id) == current_user.id:
-        return jsonify({"status": "error", "message": "نمی‌توانید حساب خودتان را حذف کنید"}), 400
+        return (
+            jsonify(
+                {"status": "error", "message": "نمی‌توانید حساب خودتان را حذف کنید"}
+            ),
+            400,
+        )
 
     users = asyncio.run(list_users())
     target = next((u for u in users if u["id"] == user_id), None)
@@ -351,7 +424,15 @@ def api_users_delete(user_id):
     if target["is_active"]:
         active_count = asyncio.run(count_active_users())
         if active_count <= 1:
-            return jsonify({"status": "error", "message": "باید حداقل یک ادمین فعال باقی بماند"}), 400
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "باید حداقل یک ادمین فعال باقی بماند",
+                    }
+                ),
+                400,
+            )
 
     asyncio.run(delete_user_db(user_id))
     log(f"User deleted by {current_user.username}: {target['username']}", "ERROR")
@@ -391,9 +472,5 @@ if __name__ == "__main__":
     asyncio.run(ensure_admin())
     log("🟢 Secure server starting...", "SUCCESS")
     socketio.run(
-        app,
-        host="0.0.0.0",
-        port=5000,
-        debug=False,
-        allow_unsafe_werkzeug=True
+        app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True
     )

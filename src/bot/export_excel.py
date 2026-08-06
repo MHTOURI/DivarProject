@@ -1,10 +1,11 @@
 import os
 from datetime import datetime
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-import aiosqlite
 
-from config import DB_PATH, EXPORT_DIR
+import aiosqlite
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+from bot.config import DB_PATH, EXPORT_DIR
 
 
 async def export_to_excel() -> str:
@@ -12,8 +13,7 @@ async def export_to_excel() -> str:
     os.makedirs(EXPORT_DIR, exist_ok=True)
 
     filename = os.path.join(
-        EXPORT_DIR,
-        f"divar_ads_{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
+        EXPORT_DIR, f"divar_ads_{datetime.now():%Y-%m-%d_%H-%M-%S}.xlsx"
     )
 
     wb = Workbook()
@@ -28,10 +28,10 @@ async def export_to_excel() -> str:
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="1E40AF")
     thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
     )
 
     for col in range(1, len(headers) + 1):
@@ -51,15 +51,17 @@ async def export_to_excel() -> str:
         """) as cursor:
             rows = await cursor.fetchall()
             for row in rows:
-                ws.append([
-                    row["token"],
-                    row["title"],
-                    row["url"],
-                    row["district"],
-                    row["text"],
-                    "بله" if row["special"] else "خیر",
-                    row["created_at"]
-                ])
+                ws.append(
+                    [
+                        row["token"],
+                        row["title"],
+                        row["url"],
+                        row["district"],
+                        row["text"],
+                        "بله" if row["special"] else "خیر",
+                        row["created_at"],
+                    ]
+                )
 
     # عرض ستون‌ها
     widths = {"A": 28, "B": 45, "C": 55, "D": 20, "E": 80, "F": 10, "G": 22}
@@ -75,8 +77,7 @@ async def export_links_txt() -> str:
     os.makedirs(EXPORT_DIR, exist_ok=True)
 
     filename = os.path.join(
-        EXPORT_DIR,
-        f"divar_links_{datetime.now():%Y-%m-%d_%H-%M-%S}.txt"
+        EXPORT_DIR, f"divar_links_{datetime.now():%Y-%m-%d_%H-%M-%S}.txt"
     )
 
     async with aiosqlite.connect(DB_PATH) as db:

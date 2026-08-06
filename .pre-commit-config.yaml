@@ -11,8 +11,3 @@ repos:
     hooks:
     -   id: black
         exclude: ^(\.env/|\.venv/|venv/|env/)
--   repo: https://github.com/pycqa/isort
-    rev: 7.0.0
-    hooks:
-    -   id: isort
-        exclude: ^(\.env/|\.venv/|venv/|env/)

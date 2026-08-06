@@ -1,11 +1,12 @@
-import aiohttp
 import asyncio
-import random
 import csv
 import os
+import random
 import re
-from typing import Optional, Dict, List, Any, Tuple
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
+
+import aiohttp
 
 
 class DivarScraper:
@@ -47,7 +48,9 @@ class DivarScraper:
         if self.session:
             await self.session.close()
 
-    async def first_request(self, pagination_payload: Optional[Dict] = None) -> Dict[str, Any]:
+    async def first_request(
+        self, pagination_payload: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         json_data = {
             "city_ids": ["1"],
             "pagination_data": pagination_payload,
@@ -83,7 +86,9 @@ class DivarScraper:
                 async with self.session.get(url) as response:
                     if response.status == 429:
                         sleep_time = random.uniform(60, 150)
-                        print(f"!!! Rate limit (429) - Sleeping for {int(sleep_time)}s ...")
+                        print(
+                            f"!!! Rate limit (429) - Sleeping for {int(sleep_time)}s ..."
+                        )
                         await asyncio.sleep(sleep_time)
                         continue
                     response.raise_for_status()
@@ -107,7 +112,9 @@ class DivarScraper:
         return data.get("list_widgets", [])
 
     @staticmethod
-    def extract_post_info(widget: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    def extract_post_info(
+        widget: Dict[str, Any],
+    ) -> Tuple[Optional[str], Optional[str]]:
         payload = widget.get("data", {}).get("action", {}).get("payload", {})
         return payload.get("token"), payload.get("ad_instance_id")
 
@@ -135,15 +142,53 @@ class DivarScraper:
         if not text:
             return "unknown"
         mapping = {
-            "ا": "a", "آ": "a", "ب": "b", "پ": "p", "ت": "t", "ث": "s",
-            "ج": "j", "چ": "ch", "ح": "h", "خ": "kh", "د": "d", "ذ": "z",
-            "ر": "r", "ز": "z", "ژ": "zh", "س": "s", "ش": "sh", "ص": "s",
-            "ض": "z", "ط": "t", "ظ": "z", "ع": "a", "غ": "gh", "ف": "f",
-            "ق": "gh", "ک": "k", "گ": "g", "ل": "l", "م": "m", "ن": "n",
-            "و": "v", "ه": "h", "ی": "i", "ئ": "e",
-            "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
-            "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
-            " ": "_", "‌": "", "ـ": "",
+            "ا": "a",
+            "آ": "a",
+            "ب": "b",
+            "پ": "p",
+            "ت": "t",
+            "ث": "s",
+            "ج": "j",
+            "چ": "ch",
+            "ح": "h",
+            "خ": "kh",
+            "د": "d",
+            "ذ": "z",
+            "ر": "r",
+            "ز": "z",
+            "ژ": "zh",
+            "س": "s",
+            "ش": "sh",
+            "ص": "s",
+            "ض": "z",
+            "ط": "t",
+            "ظ": "z",
+            "ع": "a",
+            "غ": "gh",
+            "ف": "f",
+            "ق": "gh",
+            "ک": "k",
+            "گ": "g",
+            "ل": "l",
+            "م": "m",
+            "ن": "n",
+            "و": "v",
+            "ه": "h",
+            "ی": "i",
+            "ئ": "e",
+            "۰": "0",
+            "۱": "1",
+            "۲": "2",
+            "۳": "3",
+            "۴": "4",
+            "۵": "5",
+            "۶": "6",
+            "۷": "7",
+            "۸": "8",
+            "۹": "9",
+            " ": "_",
+            "‌": "",
+            "ـ": "",
         }
         result = [mapping.get(char, char) for char in text.strip()]
         latin = "".join(result).lower()
@@ -161,7 +206,9 @@ class DivarScraper:
                 continue
 
             await asyncio.sleep(random.uniform(1, 3))
-            ad_data = await self.fetch_json_with_retry(self.build_url(token, ad_instance_id))
+            ad_data = await self.fetch_json_with_retry(
+                self.build_url(token, ad_instance_id)
+            )
 
             text = self.extract_text(ad_data)
             title = self.extract_title(ad_data)
@@ -184,10 +231,14 @@ class DivarScraper:
 
             if self.has_special_housing(title, text):
                 self.special_housing.append(row)
-                print(f"[Page {page}][{idx}] {token} -> Special Housing | {district_persian}")
+                print(
+                    f"[Page {page}][{idx}] {token} -> Special Housing | {district_persian}"
+                )
             else:
                 self.district_ads[district_latin].append(row)
-                print(f"[Page {page}][{idx}] {token} -> {district_persian} ({district_latin})")
+                print(
+                    f"[Page {page}][{idx}] {token} -> {district_persian} ({district_latin})"
+                )
 
     async def run(self) -> None:
         pagination_payload = None
@@ -223,14 +274,25 @@ class DivarScraper:
         self._save_csv_files()
 
     def _save_csv_files(self) -> None:
-        fieldnames = ["token", "title", "web_url", "district_persian", "district_latin", "text"]
+        fieldnames = [
+            "token",
+            "title",
+            "web_url",
+            "district_persian",
+            "district_latin",
+            "text",
+        ]
 
         if self.special_housing:
-            with open("special_housing.csv", "w", encoding="utf-8-sig", newline="") as f:
+            with open(
+                "special_housing.csv", "w", encoding="utf-8-sig", newline=""
+            ) as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(self.special_housing)
-            print(f"\n✔ special_housing.csv ذخیره شد ({len(self.special_housing)} آگهی)")
+            print(
+                f"\n✔ special_housing.csv ذخیره شد ({len(self.special_housing)} آگهی)"
+            )
 
         if self.district_ads:
             os.makedirs("districts", exist_ok=True)
@@ -260,24 +322,98 @@ HEADERS = {
 }
 
 REAL_ESTATE_KEYWORDS = [
-    "املاک", "مشاور املاک", "مشاورین املاک", "بنگاه", "بنگاه املاک",
-    "دفتر املاک", "دفتر معاملات", "آژانس املاک", "آژانس مسکن", "دفتر فروش",
-    "کارشناس فروش", "کارشناس املاک", "ملکی", "فایل", "فایلینگ",
-    "فایل اختصاصی", "فایل ویژه", "واحد فایل", "پرونده فروش", "مشاور",
-    "کارشناس", "تماس بگیرید", "فقط تماس", "همکاران", "همکار محترم",
-    "همکار املاک", "بازدید", "هماهنگی", "هماهنگی بازدید", "بازدید رایگان",
-    "هماهنگ کنید", "معامله", "سرمایه گذاری", "سرمایه‌گذاری", "سرمایه گذار",
-    "فرصت سرمایه گذاری", "فرصت استثنایی", "فرصت طلایی", "فرصت ویژه",
-    "فول امکانات", "لاکچری", "لوکس", "فوق العاده", "فوق‌العاده",
-    "نوساز", "کلید نخورده", "بازسازی شده", "بازسازی‌شده", "فایل خاص",
-    "فایل VIP", "vip", "وی آی پی", "اختصاصی", "اکازیون", "اکازیون واقعی",
-    "فوری", "زیر قیمت", "قیمت مناسب", "بدون مشابه", "سند", "سند تک برگ",
-    "تک برگ", "قولنامه", "سند شش دانگ", "شش دانگ", "وکالتی", "پایان کار",
-    "مشاور پاسخگو", "۲۴ ساعته", "۲۴ساعته", "ثبت رایگان", "سپردن ملک",
-    "سپردن فایل", "خرید و فروش", "رهن و اجاره", "اجاره و فروش",
-    "فروشنده واقعی", "مالک فروشنده", "همه فایل ها", "همه فایل‌ها",
-    "بیش از", "صدها فایل", "بانک فایل", "بانک اطلاعاتی", "آماده قرارداد",
-    "قرارداد رسمی", "ملک شما", "ثبت ملک", "مسکن", "هم خونه", "همخونه", "همخانه",
+    "املاک",
+    "مشاور املاک",
+    "مشاورین املاک",
+    "بنگاه",
+    "بنگاه املاک",
+    "دفتر املاک",
+    "دفتر معاملات",
+    "آژانس املاک",
+    "آژانس مسکن",
+    "دفتر فروش",
+    "کارشناس فروش",
+    "کارشناس املاک",
+    "ملکی",
+    "فایل",
+    "فایلینگ",
+    "فایل اختصاصی",
+    "فایل ویژه",
+    "واحد فایل",
+    "پرونده فروش",
+    "مشاور",
+    "کارشناس",
+    "تماس بگیرید",
+    "فقط تماس",
+    "همکاران",
+    "همکار محترم",
+    "همکار املاک",
+    "بازدید",
+    "هماهنگی",
+    "هماهنگی بازدید",
+    "بازدید رایگان",
+    "هماهنگ کنید",
+    "معامله",
+    "سرمایه گذاری",
+    "سرمایه‌گذاری",
+    "سرمایه گذار",
+    "فرصت سرمایه گذاری",
+    "فرصت استثنایی",
+    "فرصت طلایی",
+    "فرصت ویژه",
+    "فول امکانات",
+    "لاکچری",
+    "لوکس",
+    "فوق العاده",
+    "فوق‌العاده",
+    "نوساز",
+    "کلید نخورده",
+    "بازسازی شده",
+    "بازسازی‌شده",
+    "فایل خاص",
+    "فایل VIP",
+    "vip",
+    "وی آی پی",
+    "اختصاصی",
+    "اکازیون",
+    "اکازیون واقعی",
+    "فوری",
+    "زیر قیمت",
+    "قیمت مناسب",
+    "بدون مشابه",
+    "سند",
+    "سند تک برگ",
+    "تک برگ",
+    "قولنامه",
+    "سند شش دانگ",
+    "شش دانگ",
+    "وکالتی",
+    "پایان کار",
+    "مشاور پاسخگو",
+    "۲۴ ساعته",
+    "۲۴ساعته",
+    "ثبت رایگان",
+    "سپردن ملک",
+    "سپردن فایل",
+    "خرید و فروش",
+    "رهن و اجاره",
+    "اجاره و فروش",
+    "فروشنده واقعی",
+    "مالک فروشنده",
+    "همه فایل ها",
+    "همه فایل‌ها",
+    "بیش از",
+    "صدها فایل",
+    "بانک فایل",
+    "بانک اطلاعاتی",
+    "آماده قرارداد",
+    "قرارداد رسمی",
+    "ملک شما",
+    "ثبت ملک",
+    "مسکن",
+    "هم خونه",
+    "همخونه",
+    "همخانه",
 ]
 
 SEARCH_FILTERS = {
@@ -288,8 +424,16 @@ SEARCH_FILTERS = {
             "districts": {
                 "repeated_string": {
                     "value": [
-                        "178", "4148", "4177", "4184", "4179",
-                        "4178", "179", "175", "910", "4177",
+                        "178",
+                        "4148",
+                        "4177",
+                        "4184",
+                        "4179",
+                        "4178",
+                        "179",
+                        "175",
+                        "910",
+                        "4177",
                     ]
                 }
             },

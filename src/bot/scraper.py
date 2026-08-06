@@ -1,9 +1,10 @@
 import asyncio
 import random
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
-from config import (
+from bot.config import (
     AGENCY_BLOCKED_WORDS,
+    HEADERS,
     IGNORE_KEYWORDS,
     MAX_CONCURRENCY,
     MAX_RETRY,
@@ -11,25 +12,24 @@ from config import (
     REQUEST_TIMEOUT,
     SEARCH_FILTERS,
     SEARCH_URL,
-    HEADERS,
     get_cookies,
     get_random_user_agent,
 )
-from database import is_seen, mark_seen
-from logger.logger import log
-from network import (
+from bot.database import is_seen, mark_seen
+from bot.logger.logger import log
+from bot.network import (
+    CookieManager,
+    ProxyManager,
+    RecoveryPipeline,
     RequestClient,
     SessionManager,
-    ProxyManager,
     UserAgentPool,
-    CookieManager,
-    RecoveryPipeline,
 )
-
 
 # ======================================================
 # Divar Scraper
 # ======================================================
+
 
 class DivarScraper:
 
@@ -176,11 +176,7 @@ class DivarScraper:
 
     @staticmethod
     def post_info(widget: dict) -> tuple:
-        payload = (
-            widget.get("data", {})
-            .get("action", {})
-            .get("payload", {})
-        )
+        payload = widget.get("data", {}).get("action", {}).get("payload", {})
         return payload.get("token"), payload.get("ad_instance_id")
 
     # ======================================================
@@ -208,7 +204,9 @@ class DivarScraper:
                 if not result.success:
                     log(f"❌ Fetch failed for {token}: {result.error}", "ERROR")
                     if self.events:
-                        self.events.add(f"❌ Fetch failed {token}: {result.error}", "ERROR")
+                        self.events.add(
+                            f"❌ Fetch failed {token}: {result.error}", "ERROR"
+                        )
                     return {}
 
                 if self.stats:
@@ -241,7 +239,9 @@ class DivarScraper:
             pass
         # ساختار جایگزین (بعضی آگهی‌ها توضیحات را داخل widget_list می‌گذارند)
         try:
-            return ad["sections"][1]["widgets"][1]["data"]["widget_list"][0]["data"]["text"]
+            return ad["sections"][1]["widgets"][1]["data"]["widget_list"][0]["data"][
+                "text"
+            ]
         except Exception:
             return ""
 
@@ -287,7 +287,10 @@ class DivarScraper:
 
             ad = await self.fetch_ad(token, ad_id)
             if not ad:
-                log(f"⚠️ No data returned for ad {token} (fetch failed after retries)", "WARNING")
+                log(
+                    f"⚠️ No data returned for ad {token} (fetch failed after retries)",
+                    "WARNING",
+                )
                 return None
 
             title = self.extract_title(ad)
@@ -297,10 +300,16 @@ class DivarScraper:
             url = ad.get("share", {}).get("web_url", "")
             full_text = f"{title} {text}"
 
-            log(f"📄 Received: \"{title[:50]}\" | محله: {district or '-'} | {token}", "INFO")
+            log(
+                f"📄 Received: \"{title[:50]}\" | محله: {district or '-'} | {token}",
+                "INFO",
+            )
 
             if self.is_ignore(full_text):
-                log(f"🚫 Filtered out (ignore keyword): {title[:40]} | {token}", "WARNING")
+                log(
+                    f"🚫 Filtered out (ignore keyword): {title[:40]} | {token}",
+                    "WARNING",
+                )
                 if self.stats:
                     self.stats.add_filtered()
                 if self.events:
@@ -327,7 +336,10 @@ class DivarScraper:
                 special=1 if special else 0,
             )
 
-            log(f"💾 Saved{' (ویژه)' if special else ''}: \"{title[:50]}\" | {token}", "SUCCESS")
+            log(
+                f"💾 Saved{' (ویژه)' if special else ''}: \"{title[:50]}\" | {token}",
+                "SUCCESS",
+            )
 
             if self.stats:
                 self.stats.add_saved()
@@ -390,12 +402,20 @@ class DivarScraper:
                 if isinstance(item, Exception):
                     log(f"❌ process_ad exception: {item}", "ERROR")
                     import traceback
-                    for line in "".join(traceback.format_exception(type(item), item, item.__traceback__)).strip().split("\n"):
+
+                    for line in (
+                        "".join(
+                            traceback.format_exception(
+                                type(item), item, item.__traceback__
+                            )
+                        )
+                        .strip()
+                        .split("\n")
+                    ):
                         log(f"    {line}", "ERROR")
 
             count = sum(
-                1 for item in results
-                if item and not isinstance(item, Exception)
+                1 for item in results if item and not isinstance(item, Exception)
             )
             total_new += count
 
@@ -454,8 +474,7 @@ class DivarScraper:
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
             total_new += sum(
-                1 for item in results
-                if item and not isinstance(item, Exception)
+                1 for item in results if item and not isinstance(item, Exception)
             )
 
             if not self.has_next(response):

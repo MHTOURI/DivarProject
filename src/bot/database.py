@@ -1,9 +1,10 @@
 import os
-import aiosqlite
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from config import DB_PATH
+import aiosqlite
+
+from bot.config import DB_PATH
 
 
 @asynccontextmanager
@@ -64,17 +65,22 @@ async def init_db():
 # ---------- Settings ----------
 async def get_setting(key: str, default: Any = None) -> Any:
     async with get_db() as db:
-        async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
+        async with db.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ) as cur:
             row = await cur.fetchone()
             return row["value"] if row else default
 
 
 async def set_setting(key: str, value: Any):
     async with get_db() as db:
-        await db.execute("""
+        await db.execute(
+            """
             INSERT INTO settings (key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """, (key, str(value)))
+        """,
+            (key, str(value)),
+        )
         await db.commit()
 
 
@@ -85,12 +91,23 @@ async def is_seen(token: str) -> bool:
             return await cur.fetchone() is not None
 
 
-async def mark_seen(token: str, title: str, url: str, district: str, text: str, special: int, seo_title: str = ""):
+async def mark_seen(
+    token: str,
+    title: str,
+    url: str,
+    district: str,
+    text: str,
+    special: int,
+    seo_title: str = "",
+):
     async with get_db() as db:
-        await db.execute("""
+        await db.execute(
+            """
             INSERT OR IGNORE INTO ads (token, title, seo_title, url, district, text, special)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (token, title, seo_title, url, district, text, special))
+        """,
+            (token, title, seo_title, url, district, text, special),
+        )
         await db.commit()
 
 
@@ -98,12 +115,16 @@ async def get_stats() -> Dict:
     async with get_db() as db:
         async with db.execute("SELECT COUNT(*) as total FROM ads") as cur:
             total = (await cur.fetchone())["total"]
-        async with db.execute("SELECT COUNT(*) as special FROM ads WHERE special = 1") as cur:
+        async with db.execute(
+            "SELECT COUNT(*) as special FROM ads WHERE special = 1"
+        ) as cur:
             special = (await cur.fetchone())["special"]
         return {"total": total, "special": special, "filtered": 0, "runtime": "—"}
 
 
-async def get_all_ads(search: str = None, district: str = None, limit: int = 100) -> List[Dict]:
+async def get_all_ads(
+    search: str = None, district: str = None, limit: int = 100
+) -> List[Dict]:
     query = "SELECT token, title, seo_title, url, district, text, special, created_at FROM ads WHERE 1=1"
     params = []
 
@@ -126,14 +147,15 @@ async def get_all_ads(search: str = None, district: str = None, limit: int = 100
 async def get_districts() -> List[Dict]:
     async with get_db() as db:
         async with db.execute("""
-            SELECT district, COUNT(*) as count 
-            FROM ads 
-            WHERE district IS NOT NULL AND district != '' 
-            GROUP BY district 
+            SELECT district, COUNT(*) as count
+            FROM ads
+            WHERE district IS NOT NULL AND district != ''
+            GROUP BY district
             ORDER BY count DESC
         """) as cur:
             rows = await cur.fetchall()
             return [dict(row) for row in rows]
+
 
 async def get_user_by_id(user_id):
 
@@ -141,26 +163,28 @@ async def get_user_by_id(user_id):
 
         async with db.execute(
             """
-            SELECT 
+            SELECT
                 id,
                 username,
                 is_active
             FROM users
             WHERE id = ?
             """,
-            (user_id,)
+            (user_id,),
         ) as cur:
 
             row = await cur.fetchone()
 
             return dict(row) if row else None
+
+
 # ---------- Users ----------
 async def create_admin_user(username: str, password_hash: str) -> bool:
     async with get_db() as db:
         try:
             await db.execute(
                 "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, password_hash)
+                (username, password_hash),
             )
             await db.commit()
             return True
@@ -172,7 +196,7 @@ async def get_user_by_username(username: str) -> Optional[Dict]:
     async with get_db() as db:
         async with db.execute(
             "SELECT id, username, password_hash, is_active FROM users WHERE username = ?",
-            (username,)
+            (username,),
         ) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -181,8 +205,7 @@ async def get_user_by_username(username: str) -> Optional[Dict]:
 async def update_last_login(user_id: int):
     async with get_db() as db:
         await db.execute(
-            "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
-            (user_id,)
+            "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", (user_id,)
         )
         await db.commit()
 
@@ -191,8 +214,7 @@ async def change_password(user_id: int, new_hash: str):
     """تغییر رمز عبور کاربر"""
     async with get_db() as db:
         await db.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
-            (new_hash, user_id)
+            "UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id)
         )
         await db.commit()
 
@@ -202,6 +224,7 @@ async def change_password(user_id: int, new_hash: str):
 # دیگر state داخل حافظه‌ی پروسه‌ی Flask نگه‌داری نمی‌شود؛
 # از جدول settings به‌عنوان یک کانال ارتباطی ساده استفاده می‌شود.
 # ======================================================
+
 
 async def get_scraper_command() -> str:
     """'start' یا 'stop' — دستوری که پنل به worker می‌دهد"""
@@ -218,12 +241,14 @@ async def set_worker_status(running: bool):
 
 async def touch_worker_heartbeat():
     import datetime
+
     await set_setting("worker_heartbeat", datetime.datetime.utcnow().isoformat())
 
 
 async def get_worker_status() -> Dict[str, Any]:
     """وضعیت واقعی worker: در حال اجرا و آخرین ضربان (heartbeat)"""
     import datetime
+
     running = (await get_setting("scraper_running", "0")) == "1"
     heartbeat_raw = await get_setting("worker_heartbeat")
     alive = False
@@ -240,6 +265,7 @@ async def get_worker_status() -> Dict[str, Any]:
 # مدیریت کاربران (پنل ادمین)
 # ======================================================
 
+
 async def list_users() -> List[Dict]:
     async with get_db() as db:
         async with db.execute(
@@ -251,7 +277,9 @@ async def list_users() -> List[Dict]:
 
 async def count_active_users() -> int:
     async with get_db() as db:
-        async with db.execute("SELECT COUNT(*) as c FROM users WHERE is_active = 1") as cur:
+        async with db.execute(
+            "SELECT COUNT(*) as c FROM users WHERE is_active = 1"
+        ) as cur:
             row = await cur.fetchone()
             return row["c"]
 
@@ -259,8 +287,7 @@ async def count_active_users() -> int:
 async def set_user_active(user_id: int, active: bool):
     async with get_db() as db:
         await db.execute(
-            "UPDATE users SET is_active = ? WHERE id = ?",
-            (1 if active else 0, user_id)
+            "UPDATE users SET is_active = ? WHERE id = ?", (1 if active else 0, user_id)
         )
         await db.commit()
 

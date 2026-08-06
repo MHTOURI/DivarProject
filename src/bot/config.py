@@ -1,5 +1,6 @@
 import os
 import uuid
+
 from dotenv import load_dotenv
 from fake_useragent import UserAgent
 
@@ -28,6 +29,7 @@ DB_PATH = os.path.join(DATA_DIR, "divar.db")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 if not SECRET_KEY:
     import secrets
+
     SECRET_KEY = secrets.token_hex(32)
     print(
         "\n[WARNING] SECRET_KEY تنظیم نشده؛ یک مقدار تصادفی موقت ساخته شد.\n"
@@ -86,16 +88,8 @@ def get_random_user_agent() -> str:
 SEARCH_FILTERS = {
     "form_data": {
         "data": {
-            "business-type": {
-                "repeated_string": {
-                    "value": ["personal"]
-                }
-            },
-            "category": {
-                "str": {
-                    "value": "residential-rent"
-                }
-            },
+            "business-type": {"repeated_string": {"value": ["personal"]}},
+            "category": {"str": {"value": "residential-rent"}},
             "districts": {
                 "repeated_string": {
                     "value": [
@@ -115,15 +109,7 @@ SEARCH_FILTERS = {
     },
     "server_payload": {
         "@type": "type.googleapis.com/widgets.SearchData.ServerPayload",
-        "additional_form_data": {
-            "data": {
-                "sort": {
-                    "str": {
-                        "value": "sort_date"
-                    }
-                }
-            }
-        },
+        "additional_form_data": {"data": {"sort": {"str": {"value": "sort_date"}}}},
     },
 }
 
