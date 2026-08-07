@@ -5,12 +5,44 @@ A modular, extensible Python library for scraping listings from [Divar.ir](https
 ## Features
 
 - **Async-first design** - Built for modern async Python applications
-- **Modular & extensible** - Easy to customize and extend
-- **Multiple storage backends** - Memory, SQLite, or JSON storage
-- **Callback support** - Process ads in real-time as they're found
+- **Map View Support** - Scrape ads with coordinates for map display
+- **Multiple Categories** - Support for all Divar categories (residential, commercial, etc.)
+- **City & District Support** - Load cities and districts from JSON files
+- **Multiple Storage Backends** - Memory, SQLite, or JSON storage
+- **Callback Support** - Process ads in real-time as they're found
 - **Streaming API** - Process ads one at a time without waiting
-- **Monitoring mode** - Continuously monitor for new listings
+- **Monitoring Mode** - Continuously monitor for new listings
 - **Easy to build APIs** - Use as a foundation for your own API service
+- **Frontend-Ready** - Export data in formats perfect for map displays
+
+## Categories Supported
+
+```python
+from divar import CATEGORIES
+
+# All available categories:
+# Residential - Sell
+"house-villa-sell",
+"apartment-sell",
+"suite-apartment",
+"residential-sell",
+"commercial-sell",
+"office-sell",
+"presell",
+"shop-sell",
+"industry-agriculture-business-sell",
+
+# Residential - Rent
+"house-villa-rent",
+"apartment-rent",
+"suite-apartment",
+"residential-rent",
+"commercial-rent",
+"office-rent",
+"temporary-rent",
+"shop-rent",
+"industry-agriculture-business-rent",
+```
 
 ## Installation
 
@@ -36,7 +68,7 @@ async def main():
     config = ScraperConfig(
         max_pages=5,
         delay_between_requests=3.0,
-        keywords_to_filter=["املاک", "مشاور"],  # Filter agency ads
+        category="apartment-sell",  # See CATEGORIES for all options
     )
     
     scraper = DivarScraper(config=config)
@@ -48,6 +80,34 @@ async def main():
             print(f"{ad.title} - {ad.district}")
 
 asyncio.run(main())
+```
+
+### Map View Scraping
+
+Scrape ads with coordinates for displaying on a map:
+
+```python
+from divar import DivarScraper, ScraperConfig
+
+config = ScraperConfig.for_map_view(
+    category="apartment-sell",
+    bbox={
+        "min_latitude": 35.228049,
+        "min_longitude": 51.107464,
+        "max_latitude": 36.119353,
+        "max_longitude": 51.636307,
+    },
+    zoom=9.0,
+)
+
+scraper = DivarScraper(config=config)
+
+async with scraper:
+    map_ads = await scraper.scrape_map()
+    
+    for ad in map_ads:
+        print(f"{ad.title} at ({ad.latitude}, {ad.longitude})")
+        # Use these coordinates for map display
 ```
 
 ### With Storage
@@ -79,10 +139,10 @@ scraper = DivarScraper(
 
 ## Building Your Own API
 
-This library is designed to be the backend for your own API. Here's a complete FastAPI example:
+### FastAPI Example with Map Support
 
 ```python
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from divar import DivarScraper, ScraperConfig
 from divar.utils import SQLiteStorage
 
@@ -90,15 +150,22 @@ app = FastAPI()
 storage = SQLiteStorage("ads.db")
 scraper = DivarScraper()
 
-@app.post("/scrape")
-async def start_scrape(background_tasks: BackgroundTasks):
-    async def scrape():
-        async with scraper:
-            async for ad in scraper.stream(max_pages=10):
-                await storage.save(ad)
+@app.get("/map/{category}")
+async def get_map_ads(category: str):
+    """Get ads with coordinates for map display."""
+    nearby = await storage.get_nearby(
+        latitude=35.6892,
+        longitude=51.3890,
+        radius_km=50
+    )
     
-    background_tasks.add_task(scrape)
-    return {"status": "started"}
+    # Filter by category
+    ads = [ad for ad in nearby if ad.category == category]
+    
+    return {
+        "ads": [ad.to_dict() for ad in ads],
+        "total": len(ads)
+    }
 
 @app.get("/ads")
 async def get_ads():
@@ -106,7 +173,44 @@ async def get_ads():
     return {"ads": [ad.to_dict() for ad in ads]}
 ```
 
-See `examples/api_example.py` for a complete working API.
+See `examples/api_example.py` for a complete working API with map endpoint.
+
+## Frontend Integration
+
+### Display Ads on a Map (Leaflet.js Example)
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 600px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <script>
+        // Initialize map
+        var map = L.map('map').setView([35.6892, 51.3890], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        // Fetch ads from your API
+        fetch('/api/map/apartment-sell')
+            .then(res => res.json())
+            .then(data => {
+                data.ads.forEach(ad => {
+                    L.marker([ad.latitude, ad.longitude])
+                        .addTo(map)
+                        .bindPopup(`<strong>${ad.title}</strong><br>${ad.price}`);
+                });
+            });
+    </script>
+</body>
+</html>
+```
 
 ## Documentation
 
@@ -125,12 +229,6 @@ DivarScraper(
 )
 ```
 
-**Parameters:**
-- `config` - Scraper configuration
-- `on_ad_found` - Callback called for each ad found (sync or async)
-- `on_error` - Callback called on errors
-- `on_rate_limit` - Callback called when rate limited
-
 #### Methods
 
 **`async with scraper:`** - Context manager for lifecycle management
@@ -140,12 +238,17 @@ DivarScraper(
 **`await scraper.close()`** - Cleanup resources
 
 **`await scraper.search(city_id=None, max_pages=None, category=None) -> List[Ad]`**
-- Search for ads
+- Search for ads using the list view API
 - Returns list of Ad objects
 
 **`async for ad in scraper.stream(city_id=None, max_pages=None, category=None)`**
 - Async generator that yields ads as they're found
 - Useful for real-time processing
+
+**`await scraper.scrape_map(category=None, bbox=None, city_id=None, zoom=None) -> List[MapAd]`**
+- Scrape ads from the map view API
+- Returns MapAd objects with coordinates
+- Perfect for displaying on maps
 
 **`async for batch in scraper.monitor(interval=60, max_pages_per_cycle=5)`**
 - Continuously monitor for new ads
@@ -157,18 +260,29 @@ Configuration for the scraper.
 
 ```python
 ScraperConfig(
-    max_pages: int = 10,              # Max pages to scrape
-    delay_between_requests: float = 2.0,  # Delay between requests (seconds)
-    max_retries: int = 3,             # Max retry attempts
-    timeout: int = 30,                # Request timeout (seconds)
-    user_agent: str = None,           # Custom user agent
-    proxies: List[str] = [],          # Proxy URLs
-    city_id: str = "1",               # City ID (1=Tehran)
-    category: str = "",               # Category filter
-    keywords_to_ignore: List[str] = [],   # Skip ads containing these
-    keywords_to_filter: List[str] = [],   # Filter out ads containing these
+    max_pages: int = 10,
+    delay_between_requests: float = 2.0,
+    max_retries: int = 3,
+    timeout: int = 30,
+    user_agent: str = None,
+    proxies: List[str] = [],
+    city_id: str = "1",
+    category: str = "residential-rent",
+    keywords_to_ignore: List[str] = [],
+    keywords_to_filter: List[str] = [],
+    map_enabled: bool = False,
+    map_bbox: Dict[str, float] = None,
+    map_zoom: float = 9.0,
+    cities_file: str = None,
+    districts_file: str = None,
 )
 ```
+
+#### Class Methods
+
+**`ScraperConfig.for_category(category, city_id="1")`** - Create config for a category
+
+**`ScraperConfig.for_map_view(category, bbox, city_id="1", zoom=9.0)`** - Create config for map scraping
 
 ### `Ad`
 
@@ -176,28 +290,58 @@ Data model for an advertisement.
 
 ```python
 Ad(
-    token: str,           # Unique ID
-    title: str,           # Title
-    description: str,     # Description
-    url: str,             # Web URL
-    district: str,        # District/area
-    price: str = None,    # Price if available
-    category: str = "",   # Category
-    images: List[str] = [],  # Image URLs
-    phone: str = None,    # Contact phone
-    special: bool = False,   # Special listing flag
-    extra: dict = {},     # Additional data
+    token: str,
+    title: str,
+    description: str = "",
+    url: str = "",
+    district: str = "",
+    price: str = None,
+    category: str = "",
+    images: List[str] = [],
+    phone: str = None,
+    created_at: datetime = None,
+    special: bool = False,
+    latitude: float = None,
+    longitude: float = None,
+    extra: dict = {},
 )
 ```
 
 **Methods:**
 - `ad.to_dict()` - Convert to dictionary
 
+### `MapAd`
+
+Data model for map view advertisements (includes coordinates).
+
+```python
+MapAd(
+    token: str,
+    title: str,
+    latitude: float,
+    longitude: float,
+    price: str = None,
+    district: str = "",
+    url: str = "",
+    category: str = "",
+    image: str = None,
+)
+```
+
+**Methods:**
+- `ad.to_dict()` - Convert to dictionary (includes latitude/longitude)
+
+### Constants
+
+**`CATEGORIES`** - List of all supported Divar categories
+
+**`CITY_IDS`** - Dictionary of major city names to IDs
+
+**`DEFAULT_SEARCH_FILTERS`** - Default search filter configuration
+
 ### Storage Backends
 
 #### MemoryStorage
-
-In-memory storage (fast, data lost on restart).
 
 ```python
 from divar.utils import MemoryStorage
@@ -209,8 +353,6 @@ ads = await storage.get_all()
 
 #### SQLiteStorage
 
-SQLite database storage (persistent, queryable).
-
 ```python
 from divar.utils import SQLiteStorage
 
@@ -219,12 +361,12 @@ await storage.save(ad)
 ads = await storage.get_all(limit=20, offset=0)
 ads = await storage.get_by_district("تهران")
 ads = await storage.search("پیشخوان")
+ads = await storage.get_nearby(35.6892, 51.3890, radius_km=5)
 count = await storage.count()
+count = await storage.count_by_category("apartment-sell")
 ```
 
 #### JSONStorage
-
-JSON file storage (simple, human-readable).
 
 ```python
 from divar.utils import JSONStorage
@@ -242,12 +384,48 @@ ads = await storage.get_all()
 python examples/basic_usage.py
 ```
 
-### API Server
+### API Server with Map Support
 
 ```bash
 pip install fastapi uvicorn
 python examples/api_example.py
-# Visit http://localhost:8000/docs
+# Visit http://localhost:8000
+# API docs: http://localhost:8000/docs
+```
+
+## City and District Files
+
+You can load cities and districts from JSON files:
+
+```python
+scraper = DivarScraper(config=ScraperConfig(
+    cities_file="cities.json",
+    districts_file="districts.json",
+))
+
+# Load cities
+cities = scraper.load_cities()
+for city in cities:
+    print(f"{city.name}: {city.id}")
+
+# Load districts
+districts = scraper.load_districts("districts.json")
+for district in districts:
+    print(f"{district.name}: {district.id}")
+```
+
+JSON format for cities:
+```json
+[
+  {
+    "id": 1,
+    "name": "تهران",
+    "slug": "tehran",
+    "districts": [
+      {"id": "178", "name": "انسان‌وجان", "slug": "ensan-ojan"}
+    ]
+  }
+]
 ```
 
 ## Project Structure
@@ -257,55 +435,22 @@ divar-scraper/
 ├── divar/
 │   ├── __init__.py       # Package exports
 │   ├── scraper.py        # Main DivarScraper class
-│   ├── models.py         # Data models (Ad, ScraperConfig)
+│   ├── models.py         # Data models (Ad, MapAd, ScraperConfig, etc.)
 │   ├── exceptions.py     # Custom exceptions
+│   ├── py.typed          # Type hints marker
 │   └── utils/
 │       ├── __init__.py
 │       └── storage.py    # Storage backends
 ├── examples/
 │   ├── basic_usage.py    # Basic usage example
-│   └── api_example.py    # FastAPI example
+│   └── api_example.py    # FastAPI example with map support
 ├── pyproject.toml        # Package configuration
 └── README.md
-```
-
-## Running as a Module
-
-After installing, you can use it in your projects:
-
-```python
-# In your project
-from divar import DivarScraper, ScraperConfig
-from divar.utils import SQLiteStorage
-
-# Build your own scraper service
-class MyScraperService:
-    def __init__(self, db_path: str):
-        self.storage = SQLiteStorage(db_path)
-        self.config = ScraperConfig(
-            max_pages=10,
-            delay_between_requests=3.0,
-        )
-        self.scraper = DivarScraper(config=self.config)
-    
-    async def scrape_and_save(self, max_pages: int = 5):
-        async with self.scraper:
-            async for ad in self.scraper.stream(max_pages=max_pages):
-                await self.storage.save(ad)
-    
-    async def get_ads(self, district: str = None):
-        if district:
-            return await self.storage.get_by_district(district)
-        return await self.storage.get_all()
 ```
 
 ## License
 
 MIT License - feel free to use this library in your projects.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## Disclaimer
 

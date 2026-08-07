@@ -1,109 +1,159 @@
 """
-Basic usage example for Divar scraper library.
-
-This example shows how to use the DivarScraper to scrape ads
-and save them to a SQLite database.
+Basic usage examples for Divar scraper library.
 """
 
 import asyncio
 import logging
-from divar import DivarScraper, ScraperConfig
+from divar import (
+    DivarScraper, 
+    ScraperConfig, 
+    Ad, 
+    MapAd,
+    CATEGORIES,
+    CITY_IDS,
+)
 from divar.utils import SQLiteStorage
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
-async def main():
-    # Create configuration
+async def example_basic_search():
+    """Basic search example."""
+    print("\n=== Basic Search Example ===\n")
+    
     config = ScraperConfig(
-        max_pages=5,
-        delay_between_requests=3.0,  # Be respectful to the server
-        keywords_to_filter=["املاک", "مشاور", "بنگاه"],  # Filter out agency ads
+        max_pages=2,
+        delay_between_requests=3.0,
+        category="residential-rent",
+        keywords_to_filter=["املاک", "مشاور", "بنگاه"],
     )
     
-    # Create storage backend
     storage = SQLiteStorage("divar_ads.db")
     
-    # Create scraper with callbacks
     scraper = DivarScraper(
         config=config,
         on_ad_found=lambda ad: print(f"Found: {ad.title[:50]}..."),
     )
     
     async with scraper:
-        # Search for ads
-        ads = await scraper.search(max_pages=5)
+        ads = await scraper.search(max_pages=2)
         
         print(f"\nFound {len(ads)} ads\n")
         
-        # Save to storage
         for ad in ads:
             saved = await storage.save(ad)
             if saved:
-                print(f"Saved: {ad.title[:50]}")
+                print(f"Saved: {ad.title[:50]} - {ad.district}")
+
+
+async def example_all_categories():
+    """Example showing all available categories."""
+    print("\n=== All Available Categories ===\n")
     
-    # Query saved ads
-    print("\n--- Saved Ads ---")
-    saved_ads = await storage.get_all(limit=10)
-    for ad in saved_ads:
-        print(f"- {ad.title} ({ad.district})")
+    for cat in CATEGORIES:
+        print(f"  - {cat}")
+    
+    print(f"\nTotal categories: {len(CATEGORIES)}")
 
 
-async def streaming_example():
-    """Example showing how to stream ads as they're found."""
-    config = ScraperConfig(max_pages=3, delay_between_requests=2.0)
-    storage = SQLiteStorage("divar_ads.db")
+async def example_city_ids():
+    """Example showing available city IDs."""
+    print("\n=== Major City IDs ===\n")
+    
+    for city, city_id in CITY_IDS.items():
+        print(f"  - {city}: {city_id}")
+
+
+async def example_map_view():
+    """Example showing map view scraping."""
+    print("\n=== Map View Example ===\n")
+    
+    config = ScraperConfig.for_map_view(
+        category="apartment-sell",
+        bbox={
+            "min_latitude": 35.228049,
+            "min_longitude": 51.107464,
+            "max_latitude": 36.119353,
+            "max_longitude": 51.636307,
+        },
+        zoom=9.0,
+    )
     
     scraper = DivarScraper(config=config)
     
     async with scraper:
-        async for ad in scraper.stream(max_pages=3):
-            # Process each ad as it's found
-            await storage.save(ad)
-            print(f"Streamed: {ad.title[:50]} - {ad.district}")
+        map_ads = await scraper.scrape_map()
+        
+        print(f"Found {len(map_ads)} ads on map\n")
+        
+        for ad in map_ads[:10]:  # Show first 10
+            print(f"  {ad.title[:40]} at ({ad.latitude:.4f}, {ad.longitude:.4f})")
+        
+        if len(map_ads) > 10:
+            print(f"  ... and {len(map_ads) - 10} more")
 
 
-async def monitoring_example():
-    """Example showing how to monitor for new ads continuously."""
-    config = ScraperConfig(
-        max_pages=3,
-        delay_between_requests=2.0,
-        keywords_to_filter=["املاک", "مشاور"],
-    )
+async def example_storage_operations():
+    """Example showing storage operations."""
+    print("\n=== Storage Operations Example ===\n")
     
     storage = SQLiteStorage("divar_ads.db")
     
-    async def notify_new_ad(ad):
-        """Callback for new ads."""
-        print(f"\n🔔 NEW AD: {ad.title}")
-        print(f"   District: {ad.district}")
-        print(f"   URL: {ad.url}\n")
+    # Count total ads
+    total = await storage.count()
+    print(f"Total ads in database: {total}")
     
-    scraper = DivarScraper(
-        config=config,
-        on_ad_found=notify_new_ad,
+    # Count by category
+    for cat in ["apartment-sell", "residential-rent", "house-villa-sell"]:
+        count = await storage.count_by_category(cat)
+        print(f"  {cat}: {count}")
+    
+    # Search
+    results = await storage.search("پیشخوان")
+    print(f"\nSearch for 'پیشخوان': {len(results)} results")
+    
+    # Get nearby (for map display)
+    nearby = await storage.get_nearby(35.6892, 51.3890, radius_km=3)
+    print(f"\nAds near Tehran center (3km): {len(nearby)}")
+
+
+async def example_stream():
+    """Example showing streaming ads."""
+    print("\n=== Streaming Example ===\n")
+    
+    config = ScraperConfig(
+        max_pages=3,
+        delay_between_requests=2.0,
+        category="apartment-rent",
     )
     
+    scraper = DivarScraper(config=config)
+    
     async with scraper:
-        # Monitor for 5 minutes (for demo purposes)
-        async for batch in scraper.monitor(
-            interval=60.0,  # Check every 60 seconds
-            max_pages_per_cycle=2,
-            timeout=300,  # Stop after 5 minutes
-        ):
-            print(f"Batch of {len(batch)} new ads received")
-            for ad in batch:
-                await storage.save(ad)
+        count = 0
+        async for ad in scraper.stream(max_pages=3):
+            print(f"Streamed: {ad.title[:40]} - {ad.district}")
+            count += 1
+            if count >= 10:  # Limit for demo
+                break
+        
+        print(f"\nStreamed {count} ads total")
+
+
+async def main():
+    """Run all examples."""
+    await example_all_categories()
+    await example_city_ids()
+    await example_basic_search()
+    await example_map_view()
+    await example_storage_operations()
+    await example_stream()
+    
+    print("\n=== All Examples Completed ===\n")
 
 
 if __name__ == "__main__":
-    # Run basic example
     asyncio.run(main())
-    
-    # Uncomment to run other examples
-    # asyncio.run(streaming_example())
-    # asyncio.run(monitoring_example())
