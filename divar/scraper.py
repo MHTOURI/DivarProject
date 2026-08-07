@@ -7,6 +7,7 @@ It's designed to be modular and extensible, allowing users to:
 - Add custom processing logic via callbacks
 - Use custom storage backends
 - Build their own API on top
+- Scrape map data with coordinates
 """
 
 import asyncio
@@ -14,10 +15,14 @@ import logging
 import random
 from typing import Optional, Callable, List, Dict, Any, AsyncIterator
 from datetime import datetime
+from pathlib import Path
+import json
 
 import aiohttp
 
-from divar.models import Ad, ScraperConfig
+from divar.models import (
+    Ad, MapAd, ScraperConfig, CITY_IDS, CATEGORIES, DEFAULT_SEARCH_FILTERS
+)
 from divar.exceptions import RateLimitError, NetworkError, ScraperError
 
 logger = logging.getLogger(__name__)
@@ -37,7 +42,7 @@ class DivarScraper:
         
         async def main():
             config = ScraperConfig(max_pages=5, delay_between_requests=3.0)
-            scraper = DivarScraper(config)
+            scraper = DivarScraper(config=config)
             
             async with scraper:
                 ads = await scraper.search(max_pages=5)
@@ -45,6 +50,25 @@ class DivarScraper:
                     print(f"{ad.title} - {ad.district}")
         
         asyncio.run(main())
+        ```
+    
+    Example with map view:
+        ```python
+        config = ScraperConfig.for_map_view(
+            category="apartment-sell",
+            bbox={
+                "min_latitude": 35.228049,
+                "min_longitude": 51.107464,
+                "max_latitude": 36.119353,
+                "max_longitude": 51.636307,
+            }
+        )
+        scraper = DivarScraper(config=config)
+        
+        async with scraper:
+            map_ads = await scraper.scrape_map()
+            for ad in map_ads:
+                print(f"{ad.title} at ({ad.latitude}, {ad.longitude})")
         ```
     
     Example with callback:
@@ -85,6 +109,7 @@ class DivarScraper:
         
         # API endpoints
         self._search_url = "https://api.divar.ir/v8/postlist/w/search"
+        self._map_url = "https://api.divar.ir/v8/mapview/viewport"
         self._ad_url_template = "https://api.divar.ir/v8/posts-v2/web/{token}?tracker_session_id={ad_id}"
     
     async def __aenter__(self):
@@ -166,19 +191,6 @@ class DivarScraper:
     ) -> Dict[str, Any]:
         """
         Make an HTTP request with retry logic.
-        
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            url: Request URL
-            **kwargs: Additional arguments for aiohttp
-            
-        Returns:
-            JSON response as dictionary
-            
-        Raises:
-            RateLimitError: If rate limited
-            NetworkError: If network error occurs
-            ScraperError: If other error occurs
         """
         max_retries = self.config.max_retries
         base_delay = 1.0
@@ -197,7 +209,6 @@ class DivarScraper:
                         return await response.json()
                     
                     elif response.status == 429:
-                        # Rate limited
                         retry_after = int(response.headers.get("Retry-After", 60))
                         logger.warning(f"Rate limited. Waiting {retry_after}s")
                         
@@ -268,16 +279,7 @@ class DivarScraper:
         return False
     
     def _extract_ad_from_response(self, data: Dict[str, Any], ad_id: str) -> Optional[Ad]:
-        """
-        Extract Ad object from API response.
-        
-        Args:
-            data: API response data
-            ad_id: Ad instance ID
-            
-        Returns:
-            Ad object or None if extraction failed
-        """
+        """Extract Ad object from API response."""
         try:
             token = data.get("token", "")
             if not token:
@@ -301,24 +303,26 @@ class DivarScraper:
                 for widget in widgets:
                     widget_data = widget.get("data", {})
                     
-                    # Title
                     if "title" in widget_data and not title:
                         title = widget_data["title"]
                     
-                    # Description
                     if "text" in widget_data and not description:
                         description = widget_data["text"]
                     
-                    # District from SEO
                     seo = data.get("seo", {})
                     web_info = seo.get("web_info", {})
                     district = web_info.get("district_persian", "")
             
-            # URL
             url = data.get("share", {}).get("web_url", "")
-            
-            # Check if special
             is_special = "ویژه" in title or "special" in title.lower()
+            
+            # Extract coordinates if available
+            latitude = None
+            longitude = None
+            location = data.get("location", {})
+            if location:
+                latitude = location.get("latitude")
+                longitude = location.get("longitude")
             
             ad = Ad(
                 token=token,
@@ -327,6 +331,8 @@ class DivarScraper:
                 url=url,
                 district=district,
                 special=is_special,
+                latitude=latitude,
+                longitude=longitude,
                 extra={"raw_data": data},
             )
             
@@ -335,6 +341,87 @@ class DivarScraper:
         except Exception as e:
             logger.error(f"Error extracting ad: {e}")
             return None
+    
+    def _build_search_filters(
+        self,
+        category: Optional[str] = None,
+        city_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build search filters payload."""
+        filters = DEFAULT_SEARCH_FILTERS.copy()
+        
+        if category:
+            if "form_data" not in filters:
+                filters["form_data"] = {"data": {}}
+            if "data" not in filters["form_data"]:
+                filters["form_data"]["data"] = {}
+            
+            filters["form_data"]["data"]["category"] = {"str": {"value": category}}
+        
+        return filters
+    
+    async def _fetch_ad_details(self, token: str, ad_id: str) -> Dict[str, Any]:
+        """Fetch detailed ad information."""
+        url = self._ad_url_template.format(token=token, ad_id=ad_id)
+        return await self._make_request("GET", url)
+    
+    def _get_next_pagination(self, ads: List[Ad]) -> Optional[Dict[str, Any]]:
+        """Get pagination data for next page."""
+        return None
+    
+    async def _search_page(
+        self,
+        city_id: str,
+        pagination_data: Optional[Dict[str, Any]] = None,
+        category: Optional[str] = None,
+    ) -> List[Ad]:
+        """Search a single page and extract ads."""
+        payload = {
+            "city_ids": [city_id],
+            "pagination_data": pagination_data,
+            "disable_recommendation": False,
+            "map_state": {"camera_info": {"bbox": {}}},
+            "search_data": self._build_search_filters(category),
+        }
+        
+        try:
+            response = await self._make_request("POST", self._search_url, json=payload)
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+            if self.on_error:
+                await self._maybe_call(self.on_error, e)
+            return []
+        
+        ads = []
+        widgets = response.get("list_widgets", [])
+        
+        for widget in widgets:
+            token = widget.get("data", {}).get("action", {}).get("payload", {}).get("token")
+            ad_id = widget.get("data", {}).get("action", {}).get("payload", {}).get("ad_instance_id")
+            
+            if not token or not ad_id:
+                continue
+            
+            try:
+                ad_data = await self._fetch_ad_details(token, ad_id)
+                ad = self._extract_ad_from_response(ad_data, ad_id)
+                
+                if ad and not self._should_ignore(ad.title, ad.description):
+                    if self._should_filter(ad.title, ad.description):
+                        logger.debug(f"Filtered: {ad.title[:50]}")
+                        continue
+                    
+                    ads.append(ad)
+                    
+                    if self.on_ad_found:
+                        await self._maybe_call(self.on_ad_found, ad)
+                        
+            except Exception as e:
+                logger.error(f"Error fetching ad {token}: {e}")
+                if self.on_error:
+                    await self._maybe_call(self.on_error, e)
+        
+        return ads
     
     async def search(
         self,
@@ -348,13 +435,14 @@ class DivarScraper:
         Args:
             city_id: City ID to search (default: config.city_id)
             max_pages: Maximum pages to scrape (default: config.max_pages)
-            category: Category to filter by
+            category: Category to filter by (default: config.category)
             
         Returns:
             List of Ad objects found
         """
         city_id = city_id or self.config.city_id
         max_pages = max_pages or self.config.max_pages
+        category = category or self.config.category
         
         all_ads: List[Ad] = []
         pagination_data = None
@@ -374,121 +462,19 @@ class DivarScraper:
             
             all_ads.extend(ads)
             
-            # Check for next page
             if len(ads) == 0:
                 break
             
-            # Get pagination for next page
             pagination_data = self._get_next_pagination(ads)
             if not pagination_data:
                 break
             
-            # Delay between requests
             delay = self.config.delay_between_requests
             if delay > 0:
                 await asyncio.sleep(delay)
         
         logger.info(f"Scraped {len(all_ads)} ads total")
         return all_ads
-    
-    async def _search_page(
-        self,
-        city_id: str,
-        pagination_data: Optional[Dict[str, Any]] = None,
-        category: Optional[str] = None,
-    ) -> List[Ad]:
-        """
-        Search a single page and extract ads.
-        
-        Returns:
-            List of Ad objects found on this page
-        """
-        # Build request payload
-        payload = {
-            "city_ids": [city_id],
-            "pagination_data": pagination_data,
-            "disable_recommendation": False,
-            "map_state": {"camera_info": {"bbox": {}}},
-            "search_data": self._build_search_filters(category),
-        }
-        
-        try:
-            response = await self._make_request("POST", self._search_url, json=payload)
-        except Exception as e:
-            logger.error(f"Search failed: {e}")
-            if self.on_error:
-                await self._maybe_call(self.on_error, e)
-            return []
-        
-        # Extract ads from response
-        ads = []
-        widgets = response.get("list_widgets", [])
-        
-        for widget in widgets:
-            token = widget.get("data", {}).get("action", {}).get("payload", {}).get("token")
-            ad_id = widget.get("data", {}).get("action", {}).get("payload", {}).get("ad_instance_id")
-            
-            if not token or not ad_id:
-                continue
-            
-            # Fetch ad details
-            try:
-                ad_data = await self._fetch_ad_details(token, ad_id)
-                ad = self._extract_ad_from_response(ad_data, ad_id)
-                
-                if ad and not self._should_ignore(ad.title, ad.description):
-                    if self._should_filter(ad.title, ad.description):
-                        logger.debug(f"Filtered: {ad.title[:50]}")
-                        continue
-                    
-                    ads.append(ad)
-                    
-                    # Call callback
-                    if self.on_ad_found:
-                        await self._maybe_call(self.on_ad_found, ad)
-                        
-            except Exception as e:
-                logger.error(f"Error fetching ad {token}: {e}")
-                if self.on_error:
-                    await self._maybe_call(self.on_error, e)
-        
-        return ads
-    
-    def _build_search_filters(self, category: Optional[str] = None) -> Dict[str, Any]:
-        """Build search filters payload."""
-        filters = {
-            "form_data": {
-                "data": {
-                    "business-type": {"repeated_string": {"value": ["personal"]}},
-                }
-            },
-            "server_payload": {
-                "@type": "type.googleapis.com/widgets.SearchData.ServerPayload",
-                "additional_form_data": {
-                    "data": {"sort": {"str": {"value": "sort_date"}}}
-                },
-            },
-        }
-        
-        if category:
-            filters["form_data"]["data"]["category"] = {"str": {"value": category}}
-        
-        return filters
-    
-    def _get_next_pagination(self, ads: List[Ad]) -> Optional[Dict[str, Any]]:
-        """Get pagination data for next page from last ad's data."""
-        if not ads:
-            return None
-        
-        # This is a simplified version - in reality you'd need to parse
-        # the response properly. For now, we return None to indicate
-        # pagination isn't implemented in this basic version.
-        return None
-    
-    async def _fetch_ad_details(self, token: str, ad_id: str) -> Dict[str, Any]:
-        """Fetch detailed ad information."""
-        url = self._ad_url_template.format(token=token, ad_id=ad_id)
-        return await self._make_request("GET", url)
     
     async def stream(
         self,
@@ -499,25 +485,20 @@ class DivarScraper:
         """
         Stream ads as they're found (async generator).
         
-        Useful for processing ads one at a time without waiting for all pages.
-        
         Example:
             async with scraper:
                 async for ad in scraper.stream(max_pages=10):
                     await process_ad(ad)
-        
-        Yields:
-            Ad objects as they're found
         """
         city_id = city_id or self.config.city_id
         max_pages = max_pages or self.config.max_pages
+        category = category or self.config.category
         
         pagination_data = None
         
         for page in range(max_pages):
             logger.info(f"Streaming page {page + 1}/{max_pages}")
             
-            # Build request payload
             payload = {
                 "city_ids": [city_id],
                 "pagination_data": pagination_data,
@@ -551,7 +532,6 @@ class DivarScraper:
                         if not self._should_filter(ad.title, ad.description):
                             yield ad
                             
-                            # Call callback
                             if self.on_ad_found:
                                 await self._maybe_call(self.on_ad_found, ad)
                 
@@ -560,17 +540,115 @@ class DivarScraper:
                     if self.on_error:
                         await self._maybe_call(self.on_error, e)
             
-            # Check for next page
             if not widgets:
                 break
             
-            # Get pagination (simplified)
-            pagination_data = None  # Implement proper pagination extraction
+            pagination_data = None
             
-            # Delay
             delay = self.config.delay_between_requests
             if delay > 0:
                 await asyncio.sleep(delay)
+    
+    async def scrape_map(
+        self,
+        category: Optional[str] = None,
+        bbox: Optional[Dict[str, float]] = None,
+        city_id: Optional[str] = None,
+        zoom: Optional[float] = None,
+    ) -> List[MapAd]:
+        """
+        Scrape ads from the map view API.
+        
+        This returns ads with their coordinates, suitable for displaying on a map.
+        
+        Args:
+            category: Category to filter by (default: config.category)
+            bbox: Bounding box for map view (default: config.map_bbox)
+            city_id: City ID (default: config.city_id)
+            zoom: Zoom level (default: config.map_zoom)
+            
+        Returns:
+            List of MapAd objects with coordinates
+            
+        Example:
+            config = ScraperConfig.for_map_view(
+                category="apartment-sell",
+                bbox={
+                    "min_latitude": 35.228049,
+                    "min_longitude": 51.107464,
+                    "max_latitude": 36.119353,
+                    "max_longitude": 51.636307,
+                },
+                zoom=9.0,
+            )
+            scraper = DivarScraper(config=config)
+            
+            async with scraper:
+                map_ads = await scraper.scrape_map()
+                # Use map_ads for displaying on a map
+        """
+        category = category or self.config.category
+        bbox = bbox or self.config.map_bbox
+        city_id = city_id or self.config.city_id
+        zoom = zoom or self.config.map_zoom
+        
+        if not bbox:
+            # Default Tehran bbox
+            bbox = {
+                "min_latitude": 35.228049,
+                "min_longitude": 51.107464,
+                "max_latitude": 36.119353,
+                "max_longitude": 51.636307,
+            }
+        
+        # Build the map API request
+        payload = {
+            "city_ids": [city_id],
+            "search_data": self._build_search_filters(category),
+            "camera_info": {
+                "bbox": bbox,
+                "place_hash": f"{city_id}||{category}|",
+                "zoom": zoom,
+            },
+        }
+        
+        try:
+            response = await self._make_request("POST", self._map_url, json=payload)
+        except Exception as e:
+            logger.error(f"Map scrape failed: {e}")
+            if self.on_error:
+                await self._maybe_call(self.on_error, e)
+            return []
+        
+        # Parse the map response
+        map_ads = []
+        widgets = response.get("list_widgets", [])
+        
+        for widget in widgets:
+            data = widget.get("data", {})
+            ad_data = data.get("action", {}).get("payload", {})
+            
+            if not ad_data:
+                continue
+            
+            try:
+                map_ad = MapAd.from_map_response(ad_data)
+                map_ads.append(map_ad)
+                
+                if self.on_ad_found:
+                    # Convert to Ad for callback compatibility
+                    full_ad = await self._fetch_ad_details(map_ad.token, map_ad.token)
+                    ad = self._extract_ad_from_response(full_ad, map_ad.token)
+                    if ad:
+                        await self._maybe_call(self.on_ad_found, ad)
+                        
+            except Exception as e:
+                logger.error(f"Error parsing map ad: {e}")
+                if self.on_error:
+                    await self._maybe_call(self.on_error, e)
+        
+        logger.info(f"Scraped {len(map_ads)} ads from map")
+        return map_ads
     
     async def monitor(
         self,
@@ -583,23 +661,10 @@ class DivarScraper:
         Monitor Divar for new ads continuously.
         
         Yields batches of new ads at each interval.
-        
-        Example:
-            async with scraper:
-                async for batch in scraper.monitor(interval=120):
-                    for ad in batch:
-                        await send_notification(ad)
-        
-        Args:
-            city_id: City to monitor
-            interval: Seconds between checks
-            max_pages_per_cycle: Max pages per check
-            category: Category filter
-            
-        Yields:
-            Lists of new Ad objects
         """
         city_id = city_id or self.config.city_id
+        max_pages = max_pages_per_cycle
+        category = category or self.config.category
         seen_tokens = set()
         
         while True:
@@ -609,7 +674,7 @@ class DivarScraper:
             
             async for ad in self.stream(
                 city_id=city_id,
-                max_pages=max_pages_per_cycle,
+                max_pages=max_pages,
                 category=category,
             ):
                 if ad.token not in seen_tokens:
@@ -622,3 +687,178 @@ class DivarScraper:
             
             logger.info(f"Waiting {interval}s until next check")
             await asyncio.sleep(interval)
+    
+    def load_cities(self, filepath: Optional[str] = None) -> List[City]:
+        """
+        Load cities from a JSON file.
+        
+        Args:
+            filepath: Path to cities JSON file (default: config.cities_file)
+            
+        Returns:
+            List of City objects
+        """
+        filepath = filepath or self.config.cities_file
+        
+        if not filepath:
+            return []
+        
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            cities = []
+            if isinstance(data, list):
+                for item in data:
+                    cities.append(City.from_json(item))
+            elif isinstance(data, dict):
+                # Handle different JSON structures
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        cities.append(City.from_json(value))
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                cities.append(City.from_json(item))
+            
+            return cities
+            
+        except Exception as e:
+            logger.error(f"Error loading cities from {filepath}: {e}")
+            return []
+    
+    def load_districts(self, filepath: Optional[str] = None) -> List[District]:
+        """
+        Load districts from a JSON file.
+        
+        Args:
+            filepath: Path to districts JSON file (default: config.districts_file)
+            
+        Returns:
+            List of District objects
+        """
+        filepath = filepath or self.config.districts_file
+        
+        if not filepath:
+            return []
+        
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            districts = []
+            if isinstance(data, list):
+                for item in data:
+                    districts.append(District.from_json(item))
+            elif isinstance(data, dict):
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        districts.append(District.from_json(value))
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                districts.append(District.from_json(item))
+            
+            return districts
+            
+        except Exception as e:
+            logger.error(f"Error loading districts from {filepath}: {e}")
+            return []
+    
+    async def search_by_city_and_district(
+        self,
+        city_id: str,
+        district_id: Optional[str] = None,
+        category: Optional[str] = None,
+        max_pages: Optional[int] = None,
+    ) -> List[Ad]:
+        """
+        Search ads by city and optionally district.
+        
+        Args:
+            city_id: City ID to search
+            district_id: District ID to filter by (optional)
+            category: Category to filter by
+            max_pages: Maximum pages to scrape
+            
+        Returns:
+            List of Ad objects
+        """
+        # Build custom filters with district if provided
+        filters = self._build_search_filters(category)
+        
+        if district_id:
+            if "form_data" not in filters:
+                filters["form_data"] = {"data": {}}
+            if "data" not in filters["form_data"]:
+                filters["form_data"]["data"] = {}
+            
+            filters["form_data"]["data"]["districts"] = {
+                "repeated_string": {"value": [district_id]}
+            }
+        
+        city_id = city_id or self.config.city_id
+        max_pages = max_pages or self.config.max_pages
+        
+        all_ads: List[Ad] = []
+        pagination_data = None
+        
+        for page in range(max_pages):
+            logger.info(f"Scanning page {page + 1}/{max_pages}")
+            
+            payload = {
+                "city_ids": [city_id],
+                "pagination_data": pagination_data,
+                "disable_recommendation": False,
+                "map_state": {"camera_info": {"bbox": {}}},
+                "search_data": filters,
+            }
+            
+            try:
+                response = await self._make_request("POST", self._search_url, json=payload)
+            except Exception as e:
+                logger.error(f"Search failed: {e}")
+                if self.on_error:
+                    await self._maybe_call(self.on_error, e)
+                break
+            
+            ads = []
+            widgets = response.get("list_widgets", [])
+            
+            for widget in widgets:
+                token = widget.get("data", {}).get("action", {}).get("payload", {}).get("token")
+                ad_id = widget.get("data", {}).get("action", {}).get("payload", {}).get("ad_instance_id")
+                
+                if not token or not ad_id:
+                    continue
+                
+                try:
+                    ad_data = await self._fetch_ad_details(token, ad_id)
+                    ad = self._extract_ad_from_response(ad_data, ad_id)
+                    
+                    if ad and not self._should_ignore(ad.title, ad.description):
+                        if not self._should_filter(ad.title, ad.description):
+                            ads.append(ad)
+                            
+                            if self.on_ad_found:
+                                await self._maybe_call(self.on_ad_found, ad)
+                
+                except Exception as e:
+                    logger.error(f"Error fetching ad {token}: {e}")
+                    if self.on_error:
+                        await self._maybe_call(self.on_error, e)
+            
+            if not widgets:
+                break
+            
+            pagination_data = self._get_next_pagination(ads)
+            if not pagination_data:
+                break
+            
+            delay = self.config.delay_between_requests
+            if delay > 0:
+                await asyncio.sleep(delay)
+            
+            all_ads.extend(ads)
+        
+        return all_ads
