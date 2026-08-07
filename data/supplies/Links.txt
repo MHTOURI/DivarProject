@@ -1,3 +1,0 @@
-https://divar.ir/s/tehran/rent-residential
-https://api.divar.ir/v8/postlist/w/search
-https://s100.divarcdn.com/static/public/search/filters-config.json

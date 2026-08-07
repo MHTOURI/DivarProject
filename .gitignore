@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Divar Scraper specific
+*.db
+*.json
+logs/
+exports/
+divar_ads.db

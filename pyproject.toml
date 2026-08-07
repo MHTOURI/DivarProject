@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "divar-scraper"
+version = "1.0.0"
+description = "A modular Python library for scraping Divar.ir listings"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "DivarProject", email = "your-email@example.com"}
+]
+keywords = [
+    "divar",
+    "scraper",
+    "scraping",
+    "api",
+    "iran",
+    "tehran",
+    "real-estate",
+    "classifications",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet Applications :: Scraping",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "aiohttp>=3.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+]
+all = [
+    "aiohttp>=3.8.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/divar-scraper"
+Documentation = "https://github.com/yourusername/divar-scraper#readme"
+Repository = "https://github.com/yourusername/divar-scraper.git"
+Issues = "https://github.com/yourusername/divar-scraper/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["divar*"]
+
+[tool.setuptools.package-data]
+divar = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+exclude = [".git", "__pycache__", "build", "dist", "*.egg-info"]
+
+[tool.ruff.per-file-ignores]
+"examples/*" = ["F401"]

@@ -1,4 +1,0 @@
-fake-useragent
-flask
-requests
-python-dotenv
